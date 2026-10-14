@@ -1,0 +1,45 @@
+name: Deploy existing application image
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [development, staging, production]
+        required: true
+      image:
+        description: "Existing image URI, preferably pinned by sha256 digest"
+        required: true
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      CLUSTER: three-tier-${{ inputs.environment }}
+      SERVICE: three-tier-${{ inputs.environment }}
+      IMAGE: ${{ inputs.image }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Register and deploy a new task revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --query 'services[0].taskDefinition' --output text)
+          aws ecs describe-task-definition --task-definition "$CURRENT" --query taskDefinition > current.json
+          jq --arg image "$IMAGE" '
+            del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+            | (.containerDefinitions[] | select(.name == "app") | .image) = $image
+          ' current.json > next.json
+          NEXT=$(aws ecs register-task-definition --cli-input-json file://next.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --task-definition "$NEXT" > /dev/null
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+          ACTUAL=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --query 'services[0].taskDefinition' --output text)
+          test "$ACTUAL" = "$NEXT" || { echo 'Deployment rolled back'; exit 1; }

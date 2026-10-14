@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Booking demo</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#f2f5f8;color:#182b40;margin:0;padding:32px 20px}main{max-width:820px;margin:auto}h1{margin-bottom:8px}p{line-height:1.6}section{background:white;padding:24px;border-radius:12px;margin:24px 0;border:1px solid #dde4ec}label{display:block;margin:16px 0 6px}input{box-sizing:border-box;width:100%;padding:12px;border:1px solid #8b9aab;border-radius:6px;font:inherit}button{margin-top:20px;background:#185dc0;color:white;border:0;border-radius:6px;padding:12px 20px;font:inherit;cursor:pointer}button:disabled{opacity:.6}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:12px 8px;border-bottom:1px solid #e2e7ed;overflow-wrap:anywhere}th:last-child,td:last-child{text-align:right}.error{color:#a51e28}.tag{color:#526477}#message{min-height:24px}
+</style></head>
+<body><main><p class="tag">AWS Project</p><h1>Bookings</h1>
+<p>Add a sample booking, then refresh the page to see that it has been saved.</p>
+<p class="tag">{{ 'Local preview · SQLite storage' if local else 'AWS application · PostgreSQL storage' }}. Use fictional data only.</p>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<section><h2>New booking</h2><form id="booking-form">
+<label for="description">Description</label><input id="description" name="description" maxlength="200" placeholder="Example: Meeting room booking" required>
+<label for="amount">Amount (£)</label><input id="amount" name="amount" type="number" min="0.01" max="1000000" step="0.01" placeholder="45.00" required>
+<button type="submit">Save booking</button><p id="message" role="status" aria-live="polite"></p>
+</form></section><section><h2>Saved bookings</h2>
+{% if bookings %}<table><thead><tr><th>ID</th><th>Description</th><th>Amount</th></tr></thead><tbody>
+{% for booking in bookings %}<tr><td>{{ booking.id }}</td><td>{{ booking.description }}</td><td>£{{ booking.amount }}</td></tr>{% endfor %}
+</tbody></table><p class="tag">Showing the latest 100 bookings.</p>
+{% else %}<p>No bookings to display.</p>{% endif %}</section></main>
+<script>
+document.querySelector('form').addEventListener('submit',async event=>{
+ event.preventDefault();const button=event.target.querySelector('button');const message=document.querySelector('#message');button.disabled=true;
+ try {const response=await fetch('/',{method:'POST',headers:{'Content-Type':'application/json','X-Booking-Form':'1'},body:JSON.stringify({description:document.querySelector('#description').value,amount:document.querySelector('#amount').value})});const result=await response.json();if(!response.ok)throw Error(result.error||'Could not save booking.');window.location.reload();}
+ catch(error){message.textContent=error.message;button.disabled=false;}
+});
+</script></body></html>

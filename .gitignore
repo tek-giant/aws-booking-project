@@ -1,0 +1,16 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.s3.tfbackend
+crash.log
+.env
+# Commit .terraform.lock.hcl after terraform init.
+
+# Local generated files
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+current-task.json
+booking-task.json
