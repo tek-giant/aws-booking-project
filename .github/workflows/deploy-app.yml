@@ -1,47 +1,62 @@
-name: Deploy existing application image
+name: Build and deploy booking application
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - '.github/workflows/deploy-app.yml'
   workflow_dispatch:
     inputs:
       environment:
         type: choice
         options: [development, staging, production]
-        required: true
-      image:
-        description: "Existing image URI, preferably pinned by sha256 digest"
+        default: development
         required: true
 permissions:
   contents: read
   id-token: write
 concurrency:
-  group: deploy-${{ inputs.environment }}
+  group: deploy-${{ inputs.environment || 'development' }}
   cancel-in-progress: false
 jobs:
   deploy:
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: ${{ inputs.environment || 'development' }}
     env:
-      CLUSTER: three-tier-${{ inputs.environment }}
-      SERVICE: three-tier-${{ inputs.environment }}
-      IMAGE: ${{ inputs.image }}
+      CLUSTER: three-tier-${{ inputs.environment || 'development' }}
+      SERVICE: three-tier-${{ inputs.environment || 'development' }}
+      IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - name: Check GitHub identity
-        uses: actions/github-script@v7
-        env:
-          DEPLOY_ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-        with:
-          script: |
-            const token = await core.getIDToken('sts.amazonaws.com');
-            const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
-            console.log(JSON.stringify({
-              subject: claims.sub,
-              audience: claims.aud,
-              repository: claims.repository,
-              role: process.env.DEPLOY_ROLE
-            }, null, 2));
+      - uses: actions/checkout@v4
+      - name: Build Linux image
+        run: |
+          docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
+            --load -t booking-ci:local ./app
+      - name: Test the built image
+        run: |
+          docker run --rm --entrypoint python \
+            -v "$GITHUB_WORKSPACE/app/test_app.py:/app/test_app.py:ro" \
+            booking-ci:local -m unittest -v test_app.py
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
+      - name: Upload image to ECR
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REGISTRY="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+          IMAGE_URI="$REGISTRY/$SERVICE:$IMAGE_TAG"
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$REGISTRY"
+          docker tag booking-ci:local "$IMAGE_URI"
+          docker push --platform linux/amd64 "$IMAGE_URI"
+          DIGEST=$(aws ecr describe-images --repository-name "$SERVICE" --image-ids "imageTag=$IMAGE_TAG" --query 'imageDetails[0].imageDigest' --output text)
+          [[ "$DIGEST" == sha256:* ]] || { echo 'ECR did not return an image digest'; exit 1; }
+          echo "IMAGE=$REGISTRY/$SERVICE@$DIGEST" >> "$GITHUB_ENV"
+          echo "Uploaded $IMAGE_URI" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deployment digest: $DIGEST" >> "$GITHUB_STEP_SUMMARY"
       - name: Register and deploy a new task revision
         shell: bash
         run: |
