@@ -20,7 +20,7 @@ resource "aws_iam_role" "github" {
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = { StringEquals = {
         "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-        "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:environment:${var.environment}"
+        "token.actions.githubusercontent.com:sub" = "repo:tek-giant@302092145/aws-booking-project@1419860165:environment:${var.environment}"
       } }
     }]
   })
